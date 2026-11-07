@@ -57,6 +57,8 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     }
     private var lastBatteryStatus = -1
     private var lowBatteryWarned = false
+    private val btBattery by lazy { BtBattery(applicationContext) }
+    private var askedBtPermission = false
     private lateinit var robotStatus: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
@@ -235,7 +237,10 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         chips.addView(robotStatus, lp(w = ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) })
         chips.addView(padStatus, lp(w = 0, weight = 1f))
         root.addView(chips, lp(top = 18))
-        batteryChip = chip().apply { visibility = View.GONE }
+        batteryChip = chip().apply {
+            visibility = View.GONE
+            setOnClickListener { if (!btBattery.hasPermission()) requestBtPermission() else refreshBattery() }
+        }
         root.addView(batteryChip, lp(w = ViewGroup.LayoutParams.WRAP_CONTENT, top = 8))
         setRobotState("Robot offline", C.MUTED)
 
@@ -577,7 +582,10 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         refreshBattery()
     }
 
-    /** Controller battery level and charging state (Android 12+, when the pad reports it). */
+    /**
+     * Controller battery: level and charging state from the input system (Android 12+) when the
+     * pad reports it there, otherwise the level Android's Bluetooth settings show.
+     */
     private fun refreshBattery() {
         val dev = currentPad()
         if (dev == null) {
@@ -586,23 +594,36 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             return
         }
         batteryChip.visibility = View.VISIBLE
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            setChip(batteryChip, "Battery: needs Android 12+", C.MUTED)
-            return
+
+        var pct: Int? = null
+        var status = -1
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val bs = dev.batteryState
+            if (bs.isPresent) {
+                pct = bs.capacity.takeUnless { it.isNaN() }?.let { Math.round(it * 100) }
+                status = bs.status
+            }
         }
-        val bs = dev.batteryState
-        if (!bs.isPresent) {
-            setChip(batteryChip, "Battery: not reported by this controller", C.MUTED)
-            return
+        if (pct == null) {
+            if (!btBattery.hasPermission()) {
+                setChip(batteryChip, "Battery: tap to allow Bluetooth access", C.AMBER)
+                if (!askedBtPermission) requestBtPermission()
+                return
+            }
+            btBattery.start()
+            pct = btBattery.levelFor(dev.name)
         }
-        val pct = bs.capacity.takeUnless { it.isNaN() }?.let { Math.round(it * 100) }
-        val status = bs.status
+
         val state = when (status) {
             BatteryState.STATUS_CHARGING -> "Charging"
             BatteryState.STATUS_FULL -> "Fully charged"
             BatteryState.STATUS_DISCHARGING -> "On battery"
             BatteryState.STATUS_NOT_CHARGING -> "Plugged in, not charging"
             else -> null
+        }
+        if (pct == null && state == null) {
+            setChip(batteryChip, "Battery: not reported (USB or Bluetooth off?)", C.MUTED)
+            return
         }
         val charging = status == BatteryState.STATUS_CHARGING || status == BatteryState.STATUS_FULL
         val color = when {
@@ -612,8 +633,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             else -> C.ACCENT
         }
         val parts = listOfNotNull(pct?.let { "$it%" }, state)
-        val label = (if (status == BatteryState.STATUS_CHARGING) "⚡ " else "") +
-                "Battery " + (if (parts.isEmpty()) "level unknown" else parts.joinToString(" · "))
+        val label = (if (status == BatteryState.STATUS_CHARGING) "⚡ " else "") + "Battery " + parts.joinToString(" · ")
         setChip(batteryChip, label, color)
 
         if (lastBatteryStatus != -1 && status != lastBatteryStatus && state != null) appendLog("Controller: $state")
@@ -623,6 +643,21 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             appendLog("Controller battery low ($pct%) - charge it soon")
             lowBatteryWarned = true
         }
+    }
+
+    private fun requestBtPermission() {
+        askedBtPermission = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), BtBattery.PERMISSION_REQUEST)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != BtBattery.PERMISSION_REQUEST) return
+        if (btBattery.hasPermission()) btBattery.start()
+        else appendLog("Bluetooth access denied - controller battery level unavailable")
+        refreshBattery()
     }
 
     override fun onResume() {
@@ -641,6 +676,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         (getSystemService(Context.INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(this)
         isResumedNow = false
         ui.removeCallbacks(batteryPoll)
+        btBattery.stop()
         stopDiscovery()
         // Never keep driving the robot while the app is in the background.
         pad.reset()

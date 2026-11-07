@@ -29,10 +29,13 @@ D-pad left/right=J3, left stick=X,Y (J1,J2), right stick=Z,Rz (J3,J4),
 LT/RT=Rx or J5, LB/RB=Ry or J6.
 
 ## Controller battery
-With a controller connected, a chip under the status row shows its battery level
-and charging state (e.g. "⚡ Battery 64% · Charging"), refreshed every 5 s. The
-log notes charging changes and warns once at 20%. Needs Android 12+ and a pad that
-reports its battery (Xbox pads over Bluetooth usually do; wired USB pads don't).
+With a controller connected, a chip under the status row shows its battery
+(e.g. "⚡ Battery 64% · Charging"), refreshed every 5 s. The log notes charging
+changes and warns once at 20%.
+- Android 12+ pads that report battery to the input system give level + charging state.
+- Otherwise the app reads the level Android's Bluetooth settings show (asks once for
+  the "Nearby devices" permission; tap the chip to ask again). Bluetooth gives the
+  level only, no charging state. Wired USB pads usually report nothing.
 
 ## Jog modes
 Pick the mode in the app's "Jog mode" card or cycle it with Y:

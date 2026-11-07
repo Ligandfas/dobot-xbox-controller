@@ -1,13 +1,9 @@
 package com.nova5.xboxcontrol
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.SystemClock
 import android.view.KeyEvent
 import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.abs
@@ -19,7 +15,7 @@ private const val TRIGGER_THRESHOLD = 0.5f
 private const val LOOP_PERIOD_MS = 50L // 20 Hz, same as the Python script
 
 /** Minimal client for Dobot's ASCII TCP-IP protocol. */
-class Dobot(private val socket: Socket) {
+class Dobot(private val socket: java.net.Socket) {
     fun send(cmd: String): String {
         socket.getOutputStream().apply {
             write(cmd.toByteArray(Charsets.UTF_8))
@@ -38,26 +34,6 @@ class Dobot(private val socket: Socket) {
     fun close() {
         try { socket.close() } catch (_: IOException) {}
     }
-}
-
-/**
- * Open a socket, preferring a Wi-Fi/Ethernet network. Wi-Fi networks without
- * internet (typical for a robot LAN) are otherwise bypassed by Android in favour
- * of mobile data.
- */
-@Suppress("DEPRECATION")
-private fun openSocket(ctx: Context, ip: String, port: Int): Socket {
-    val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    val net = cm.allNetworks.firstOrNull {
-        val caps = cm.getNetworkCapabilities(it)
-        caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
-    }
-    val s = net?.socketFactory?.createSocket() ?: Socket()
-    s.tcpNoDelay = true
-    s.soTimeout = 400
-    s.connect(InetSocketAddress(ip, port), 3000)
-    return s
 }
 
 private fun signOrNull(v: Float): String? = when {

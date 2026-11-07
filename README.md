@@ -14,7 +14,11 @@ Port of `nova5_xbox_control.py`. Same button mapping, same Dobot TCP-IP commands
 1. Join the robot's network (Wi-Fi, or USB-Ethernet adapter). Put the Nova 5 in
    TCP/IP remote-control mode on the pendant.
 2. Pair/plug in the Xbox controller (Bluetooth or USB-OTG).
-3. Enter the robot IP, start speed (keep it low), script names. Tap Connect.
+3. Leave Auto-connect on: the app finds the robot on the phone's Wi-Fi/Ethernet
+   network (port 29999, checked with a read-only RobotMode() query) and connects.
+   It tries the last IP and the Dobot defaults (192.168.5.1, 192.168.1.6,
+   192.168.2.6, 192.168.9.1) first, then scans the subnet. "Find" searches once on
+   demand. Or type the IP and tap Connect. Auto-connect never enables the robot.
 4. Press Start on the pad to enable. The big red button disables and stops jog.
 
 ## Controls (unchanged from the Python script)

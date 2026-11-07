@@ -38,12 +38,19 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     private lateinit var scriptBEdit: EditText
     private lateinit var j5Check: Switch
     private lateinit var j3Check: Switch
+    private lateinit var autoSwitch: Switch
     private lateinit var connectBtn: Button
     private lateinit var padStatus: TextView
     private lateinit var robotStatus: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
     private val logBuf = ArrayDeque<String>()
+
+    // Auto-detect / auto-connect
+    private var discovery: Discovery? = null
+    private var discoveryGen = 0
+    private var isResumedNow = false
+    private var userStopped = false // user pressed Disconnect: don't reconnect until asked
 
     private val prefs get() = getSharedPreferences("cfg", Context.MODE_PRIVATE)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -216,13 +223,31 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
 
         // Connection
         val conn = card("Connection", root)
-        ipEdit = field(conn, "Robot IP address",
-            edit(prefs.getString("ip", "192.168.5.1") ?: "192.168.5.1", "192.168.5.1")) as EditText
+        ipEdit = edit(prefs.getString("ip", "192.168.5.1") ?: "192.168.5.1", "192.168.5.1")
+        val ipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        ipRow.addView(ipEdit, lp(w = 0, weight = 1f))
+        ipRow.addView(Button(this).apply {
+            text = "Find"
+            style(withAlpha(C.ACCENT, 38), C.ACCENT, withAlpha(C.ACCENT, 110))
+            minHeight = dp(46); minimumHeight = dp(46); minWidth = dp(76); minimumWidth = dp(76)
+            setOnClickListener { userStopped = false; startDiscovery(repeat = false) }
+        }, lp(w = ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(10) })
+        field(conn, "Robot IP address", ipRow)
         speedEdit = field(conn, "Start speed % (1-100) · keep it low",
             edit(prefs.getInt("speed", 15).toString(), "15", number = true)) as EditText
         connectBtn = Button(this).apply {
             text = "Connect"
             setOnClickListener { if (teleop == null) connect() else disconnect() }
+        }
+        autoSwitch = toggle(conn, "Auto-connect", "Find the robot on this network and connect",
+            prefs.getBoolean("auto", true))
+        autoSwitch.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean("auto", on).apply()
+            if (on) { userStopped = false; if (isResumedNow && teleop == null) startDiscovery(repeat = true) }
+            else if (discovery != null) { stopDiscovery(); setRobotState("Robot offline", C.MUTED) }
         }
         styleConnect(connected = false)
         conn.addView(connectBtn, lp(top = 18))
@@ -297,7 +322,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             isFillViewport = true
             addView(root)
         })
-        appendLog("Ready. Enter the robot IP and tap Connect.")
+        appendLog("Ready. Auto-connect finds the robot, or enter its IP and tap Connect.")
     }
 
     private fun styleConnect(connected: Boolean) {
@@ -335,6 +360,8 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             .putBoolean("j3Invert", j3Check.isChecked)
             .apply()
 
+        stopDiscovery()
+        userStopped = false
         pad.reset()
         styleConnect(connected = true)
         setRobotState("Connecting…", C.AMBER)
@@ -348,6 +375,8 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
                     teleop = null
                     styleConnect(connected = false)
                     setRobotState("Robot offline", C.MUTED)
+                    // Connection dropped (not a user Disconnect / app pause): look for the robot again.
+                    if (isResumedNow && autoSwitch.isChecked && !userStopped) startDiscovery(repeat = true, delayMs = 2000)
                 }
             },
             onConnected = { runOnUiThread { setRobotState("Robot $ip", C.GREEN) } },
@@ -355,7 +384,45 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     }
 
     private fun disconnect() {
+        userStopped = true
         teleop?.shutdown()
+    }
+
+    // ------------------------------------------------------- auto-detect
+    private fun startDiscovery(repeat: Boolean, delayMs: Long = 0) {
+        stopDiscovery()
+        if (teleop != null) return
+        val gen = ++discoveryGen
+        setRobotState("Searching…", C.AMBER)
+        val preferred = (listOf(ipEdit.text.toString().trim(), prefs.getString("ip", "") ?: "") + DOBOT_DEFAULT_IPS)
+            .filter { it.isNotEmpty() }.distinct()
+        discovery = Discovery(applicationContext, preferred, repeat, delayMs, ::postLog,
+            onFound = { ip ->
+                runOnUiThread {
+                    if (gen == discoveryGen && teleop == null) {
+                        discovery = null
+                        appendLog("Robot found at $ip")
+                        ipEdit.setText(ip)
+                        connect()
+                    }
+                }
+            },
+            onNotFound = {
+                runOnUiThread {
+                    if (gen == discoveryGen) {
+                        discovery = null
+                        appendLog("No robot found. Check the network and that TCP/IP mode is on.")
+                        setRobotState("Robot not found", C.RED)
+                    }
+                }
+            },
+        ).also { it.start() }
+    }
+
+    private fun stopDiscovery() {
+        discoveryGen++
+        discovery?.cancel()
+        discovery = null
     }
 
     // ----------------------------------------------------- controller input
@@ -409,11 +476,16 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         super.onResume()
         (getSystemService(Context.INPUT_SERVICE) as InputManager).registerInputDeviceListener(this, null)
         refreshPadStatus()
+        isResumedNow = true
+        userStopped = false
+        if (autoSwitch.isChecked && teleop == null) startDiscovery(repeat = true)
     }
 
     override fun onPause() {
         super.onPause()
         (getSystemService(Context.INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(this)
+        isResumedNow = false
+        stopDiscovery()
         // Never keep driving the robot while the app is in the background.
         pad.reset()
         teleop?.shutdown()

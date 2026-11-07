@@ -22,10 +22,18 @@ Port of `nova5_xbox_control.py`. Same button mapping, same Dobot TCP-IP commands
 4. Press Start on the pad to enable. The big red button disables and stops jog.
 
 ## Controls (unchanged from the Python script)
-Start=enable, Back/View=disable, Y=Cartesian/Joint, B=clear error, A/X=run scripts,
+Start=enable, Back/View=disable, Y=next jog mode (Base > Tool (TCP) > Joint), B=clear error, A/X=run scripts,
 L3=stop script, R3=pause/continue, D-pad up/down=speed +/-10%,
 D-pad left/right=J3, left stick=X,Y (J1,J2), right stick=Z,Rz (J3,J4),
 LT/RT=Rx or J5, LB/RB=Ry or J6.
+
+## Jog modes
+Pick the mode in the app's "Jog mode" card or cycle it with Y:
+- Base: sticks move the TCP along the base/user frame (`MoveJog(X+)`, or
+  `coordtype=1,user=N,tool=N` when a user frame / tool index is set).
+- Tool (TCP): sticks move along the tool's own axes (`MoveJog(X+,coordtype=2,user=N,tool=N)`).
+- Joint: sticks drive J1-J6.
+User frame and tool indices (0-9) must match frames defined on the controller.
 
 ## Safety behaviour
 The app disconnects (sending MoveJog()) when it goes to the background, when the

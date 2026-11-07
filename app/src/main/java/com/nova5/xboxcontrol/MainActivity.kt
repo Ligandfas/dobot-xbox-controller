@@ -39,6 +39,11 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     private lateinit var j5Check: Switch
     private lateinit var j3Check: Switch
     private lateinit var autoSwitch: Switch
+    private lateinit var modeButtons: Map<JogMode, TextView>
+    private lateinit var modeHint: TextView
+    private lateinit var userIdxEdit: EditText
+    private lateinit var toolIdxEdit: EditText
+    private var jogMode = JogMode.BASE
     private lateinit var connectBtn: Button
     private lateinit var padStatus: TextView
     private lateinit var robotStatus: TextView
@@ -221,6 +226,21 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         root.addView(chips, lp(top = 18))
         setRobotState("Robot offline", C.MUTED)
 
+        // Log console
+        val logCard = card("Activity", root)
+        logView = TextView(this).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            setTextColor(Color.parseColor("#A9B6CE"))
+            setLineSpacing(0f, 1.15f)
+        }
+        logScroll = ScrollView(this).apply {
+            background = rounded(C.CONSOLE, 12f)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            addView(logView)
+        }
+        logCard.addView(logScroll, lp(h = dp(170), top = 12))
+
         // Connection
         val conn = card("Connection", root)
         ipEdit = edit(prefs.getString("ip", "192.168.5.1") ?: "192.168.5.1", "192.168.5.1")
@@ -267,6 +287,45 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         }, lp(w = 0, weight = 1.4f))
         root.addView(row, lp(top = 14))
 
+        // Jog mode
+        val jog = card("Jog mode", root)
+        val seg = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = rounded(C.SURFACE_HIGH, 14f, C.OUTLINE)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        modeButtons = JogMode.values().associateWith { m ->
+            text(m.label, 14f, C.MUTED, medium).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(10), 0, dp(10))
+                isClickable = true
+                setOnClickListener { setJogMode(m, fromPad = false) }
+                seg.addView(this, lp(w = 0, weight = 1f))
+            }
+        }
+        jog.addView(seg, lp(top = 12))
+        modeHint = text("", 12.5f, C.MUTED)
+        jog.addView(modeHint, lp(top = 10))
+        val idxRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val userCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        userIdxEdit = edit(prefs.getInt("userIdx", 0).toString(), "0", number = true)
+        field(userCol, "User frame (0-9)", userIdxEdit)
+        val toolCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        toolIdxEdit = edit(prefs.getInt("toolIdx", 0).toString(), "0", number = true)
+        field(toolCol, "Tool (0-9)", toolIdxEdit)
+        idxRow.addView(userCol, lp(w = 0, weight = 1f).apply { rightMargin = dp(10) })
+        idxRow.addView(toolCol, lp(w = 0, weight = 1f))
+        jog.addView(idxRow)
+        val idxWatcher = object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { applyIndices() }
+        }
+        userIdxEdit.addTextChangedListener(idxWatcher)
+        toolIdxEdit.addTextChangedListener(idxWatcher)
+        jogMode = try { JogMode.valueOf(prefs.getString("jogMode", "BASE") ?: "BASE") } catch (_: Exception) { JogMode.BASE }
+        renderJogMode()
+
         // Scripts
         val scripts = card("Scripts", root)
         scriptAEdit = field(scripts, "A button runs",
@@ -286,7 +345,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             "L stick" to "X / Y  ·  J1 / J2", "R stick" to "Z / Rz  ·  J3 / J4",
             "LT  RT" to "Rx  ·  J5", "LB  RB" to "Ry  ·  J6",
             "D-pad ◀ ▶" to "J3", "D-pad ▲ ▼" to "Speed ±10%",
-            "Y" to "Cartesian / Joint mode", "B" to "Clear error",
+            "Y" to "Next jog mode", "B" to "Clear error",
             "A  X" to "Run scripts", "L3  /  R3" to "Stop  /  Pause-continue script",
         ).forEach { (key, action) ->
             val r = LinearLayout(this).apply {
@@ -302,27 +361,44 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
             ctl.addView(r, lp(top = 10))
         }
 
-        // Log console
-        val logCard = card("Activity", root)
-        logView = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 12f
-            setTextColor(Color.parseColor("#A9B6CE"))
-            setLineSpacing(0f, 1.15f)
-        }
-        logScroll = ScrollView(this).apply {
-            background = rounded(C.CONSOLE, 12f)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            addView(logView)
-        }
-        logCard.addView(logScroll, lp(h = dp(220), top = 12))
-
         setContentView(ScrollView(this).apply {
             setBackgroundColor(C.BG)
             isFillViewport = true
             addView(root)
         })
         appendLog("Ready. Auto-connect finds the robot, or enter its IP and tap Connect.")
+    }
+
+    private fun idx(e: EditText) = e.text.toString().toIntOrNull()?.coerceIn(0, 9) ?: 0
+
+    private fun applyIndices() {
+        val u = idx(userIdxEdit); val t = idx(toolIdxEdit)
+        prefs.edit().putInt("userIdx", u).putInt("toolIdx", t).apply()
+        teleop?.let { it.userIndex = u; it.toolIndex = t }
+    }
+
+    private fun setJogMode(m: JogMode, fromPad: Boolean) {
+        if (m == jogMode && !fromPad) return
+        jogMode = m
+        prefs.edit().putString("jogMode", m.name).apply()
+        if (!fromPad) {
+            teleop?.mode = m
+            appendLog("Mode: ${m.label}")
+        }
+        renderJogMode()
+    }
+
+    private fun renderJogMode() {
+        modeButtons.forEach { (m, v) ->
+            val on = m == jogMode
+            v.background = if (on) rounded(C.ACCENT, 10f) else null
+            v.setTextColor(if (on) Color.WHITE else C.MUTED)
+        }
+        modeHint.text = when (jogMode) {
+            JogMode.BASE -> "Sticks move the TCP along the base / user frame axes."
+            JogMode.TOOL -> "Sticks move the TCP along its own tool axes."
+            JogMode.JOINT -> "Sticks drive individual joints J1-J6."
+        }
     }
 
     private fun styleConnect(connected: Boolean) {
@@ -380,7 +456,13 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
                 }
             },
             onConnected = { runOnUiThread { setRobotState("Robot $ip", C.GREEN) } },
-        ).also { it.start() }
+            initialMode = jogMode,
+            onModeChanged = { m -> runOnUiThread { setJogMode(m, fromPad = true) } },
+        ).also {
+            it.userIndex = idx(userIdxEdit)
+            it.toolIndex = idx(toolIdxEdit)
+            it.start()
+        }
     }
 
     private fun disconnect() {

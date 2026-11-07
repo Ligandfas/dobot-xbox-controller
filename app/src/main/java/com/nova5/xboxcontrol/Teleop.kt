@@ -42,6 +42,12 @@ private fun signOrNull(v: Float): String? = when {
     else -> null
 }
 
+/** How the sticks jog the arm. BASE and TOOL move the TCP in Cartesian space. */
+enum class JogMode(val label: String) {
+    BASE("Base"), TOOL("Tool (TCP)"), JOINT("Joint");
+    fun next() = values()[(ordinal + 1) % values().size]
+}
+
 class Teleop(
     private val ctx: Context,
     private val ip: String,
@@ -54,7 +60,24 @@ class Teleop(
     private val log: (String) -> Unit,
     private val onEnded: () -> Unit,
     private val onConnected: () -> Unit = {},
+    initialMode: JogMode = JogMode.BASE,
+    private val onModeChanged: (JogMode) -> Unit = {},
 ) : Thread("nova5-teleop") {
+
+    /** Jog mode; set from the UI or cycled with the Y button. */
+    @Volatile var mode: JogMode = initialMode
+    /** User-frame and tool indices (0-9) used for Cartesian jogging. */
+    @Volatile var userIndex = 0
+    @Volatile var toolIndex = 0
+
+    /** Full MoveJog command for an axis ("" = stop) in the current mode (Dobot TCP-IP V4 syntax). */
+    private fun jogCommand(axis: String, m: JogMode): String = when {
+        axis.isEmpty() -> "MoveJog()"
+        axis.startsWith("J") -> "MoveJog($axis)"
+        m == JogMode.TOOL -> "MoveJog($axis,coordtype=2,user=$userIndex,tool=$toolIndex)"
+        userIndex == 0 && toolIndex == 0 -> "MoveJog($axis)" // controller default: user frame 0
+        else -> "MoveJog($axis,coordtype=1,user=$userIndex,tool=$toolIndex)"
+    }
 
     @Volatile private var running = true
     private val commands = ConcurrentLinkedQueue<String>()
@@ -77,7 +100,6 @@ class Teleop(
             log("SpeedFactor($speed): " + dash.send("SpeedFactor($speed)").trim())
             log("Ready. Press Start to enable the robot.")
 
-            var cartesian = true
             var currentJog = ""
             var paused = false
             var prevKeys: Set<Int> = emptySet()
@@ -111,8 +133,9 @@ class Teleop(
                     log(dash.send("DisableRobot()").trim().ifEmpty { "DisableRobot() sent" })
                 }
                 if (pressed(KeyEvent.KEYCODE_BUTTON_Y)) {
-                    cartesian = !cartesian
-                    log("Mode: " + if (cartesian) "Cartesian" else "Joint")
+                    mode = mode.next()
+                    log("Mode: ${mode.label}")
+                    onModeChanged(mode)
                 }
                 if (pressed(KeyEvent.KEYCODE_BUTTON_B)) {
                     log(dash.send("ClearError()").trim().ifEmpty { "ClearError() sent" })
@@ -170,7 +193,8 @@ class Teleop(
                 val ly = -pad.ly
                 val rx = pad.rx
                 val ry = -pad.ry
-                val names = if (cartesian) listOf("X", "Y", "Z", "Rz", "Rx", "Ry")
+                val m = mode
+                val names = if (m != JogMode.JOINT) listOf("X", "Y", "Z", "Rz", "Rx", "Ry")
                 else listOf("J1", "J2", "J3", "J4", "J5", "J6")
 
                 var desired: String? = null
@@ -194,11 +218,12 @@ class Teleop(
                     else if (KeyEvent.KEYCODE_BUTTON_L1 in down) desired = names[5] + "-"
                 }
 
-                val want = desired ?: ""
+                val axis = desired ?: ""
+                val want = if (axis.isEmpty()) "" else jogCommand(axis, m)
                 if (want != currentJog) {
-                    move.send("MoveJog($want)")
+                    move.send(if (want.isEmpty()) "MoveJog()" else want)
                     currentJog = want
-                    log(if (want.isEmpty()) "Jog: stop" else "Jog: $want")
+                    log(if (want.isEmpty()) "Jog: stop" else "Jog: $axis" + if (axis.startsWith("J")) "" else " (${m.label})")
                 }
 
                 prevKeys = down

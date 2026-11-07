@@ -288,16 +288,24 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         // Robot power
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(Button(this).apply {
+            text = "Power on"
+            style(withAlpha(C.ACCENT, 38), C.ACCENT, withAlpha(C.ACCENT, 110))
+            setOnClickListener {
+                val t = teleop
+                if (t == null) appendLog("Connect to the robot first, then Power on.") else t.requestPowerOn()
+            }
+        }, lp(w = 0, weight = 1f).apply { rightMargin = dp(8) })
+        row.addView(Button(this).apply {
             text = "Enable"
             style(withAlpha(C.GREEN, 38), C.GREEN, withAlpha(C.GREEN, 110))
             setOnClickListener { teleop?.requestEnable() }
-        }, lp(w = 0, weight = 1f).apply { rightMargin = dp(10) })
+        }, lp(w = 0, weight = 1f).apply { rightMargin = dp(8) })
         row.addView(Button(this).apply {
-            text = "STOP · Disable"
+            text = "STOP"
             style(C.RED, Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
             setOnClickListener { teleop?.requestDisable() }
-        }, lp(w = 0, weight = 1.4f))
+        }, lp(w = 0, weight = 1.2f))
         root.addView(row, lp(top = 14))
 
         // Jog mode

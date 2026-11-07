@@ -19,7 +19,8 @@ Port of `nova5_xbox_control.py`. Same button mapping, same Dobot TCP-IP commands
    It tries the last IP and the Dobot defaults (192.168.5.1, 192.168.1.6,
    192.168.2.6, 192.168.9.1) first, then scans the subnet. "Find" searches once on
    demand. Or type the IP and tap Connect. Auto-connect never enables the robot.
-4. Press Start on the pad to enable. The big red button disables and stops jog.
+4. Tap Power on (sends PowerOn(); wait ~10 s for the arm to boot), then press
+   Start on the pad or tap Enable. The red STOP button disables and stops jog.
 
 ## Controls (unchanged from the Python script)
 Start=enable, Back/View=disable, Y=next jog mode (Base > Tool (TCP) > Joint), B=clear error, A/X=run scripts,

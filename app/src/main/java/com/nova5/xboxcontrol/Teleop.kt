@@ -83,6 +83,7 @@ class Teleop(
     private val commands = ConcurrentLinkedQueue<String>()
 
     fun shutdown() { running = false }
+    fun requestPowerOn() { commands.add("poweron") }
     fun requestEnable() { commands.add("enable") }
     fun requestDisable() { commands.add("disable") }
 
@@ -111,6 +112,10 @@ class Teleop(
                 // ---- On-screen buttons ----
                 while (true) {
                     when (commands.poll() ?: break) {
+                        "poweron" -> {
+                            log(dash.send("PowerOn()").trim().ifEmpty { "PowerOn() sent" })
+                            log("Powering on the arm - wait about 10 s, then Enable.")
+                        }
                         "enable" -> log(dash.send("EnableRobot()").trim().ifEmpty { "EnableRobot() sent" })
                         "disable" -> {
                             move.send("MoveJog()")

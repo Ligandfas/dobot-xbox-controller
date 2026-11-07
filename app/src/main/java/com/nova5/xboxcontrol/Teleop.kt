@@ -77,6 +77,7 @@ class Teleop(
     private val pad: PadState,
     private val log: (String) -> Unit,
     private val onEnded: () -> Unit,
+    private val onConnected: () -> Unit = {},
 ) : Thread("nova5-teleop") {
 
     @Volatile private var running = true
@@ -94,6 +95,7 @@ class Teleop(
             dash = Dobot(openSocket(ctx, ip, DASHBOARD_PORT))
             move = Dobot(openSocket(ctx, ip, MOVE_PORT))
             log("Connected.")
+            onConnected()
 
             var speed = startSpeed.coerceIn(1, 100)
             log("SpeedFactor($speed): " + dash.send("SpeedFactor($speed)").trim())

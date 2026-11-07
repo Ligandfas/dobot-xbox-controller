@@ -9,7 +9,11 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.hardware.input.InputManager
+import android.hardware.BatteryState
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.InputDevice
@@ -46,6 +50,13 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     private var jogMode = JogMode.BASE
     private lateinit var connectBtn: Button
     private lateinit var padStatus: TextView
+    private lateinit var batteryChip: TextView
+    private val ui = Handler(Looper.getMainLooper())
+    private val batteryPoll = object : Runnable {
+        override fun run() { refreshBattery(); ui.postDelayed(this, 5000) }
+    }
+    private var lastBatteryStatus = -1
+    private var lowBatteryWarned = false
     private lateinit var robotStatus: TextView
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
@@ -224,6 +235,8 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         chips.addView(robotStatus, lp(w = ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) })
         chips.addView(padStatus, lp(w = 0, weight = 1f))
         root.addView(chips, lp(top = 18))
+        batteryChip = chip().apply { visibility = View.GONE }
+        root.addView(batteryChip, lp(w = ViewGroup.LayoutParams.WRAP_CONTENT, top = 8))
         setRobotState("Robot offline", C.MUTED)
 
         // Log console
@@ -545,13 +558,63 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
     }
 
     // ------------------------------------------------- safety / lifecycle
+    private fun currentPad(): InputDevice? = InputDevice.getDeviceIds().asSequence()
+        .mapNotNull { InputDevice.getDevice(it) }
+        .firstOrNull { has(it.sources, InputDevice.SOURCE_GAMEPAD) || has(it.sources, InputDevice.SOURCE_JOYSTICK) }
+
     private fun refreshPadStatus() {
-        val name = InputDevice.getDeviceIds().asSequence()
-            .mapNotNull { InputDevice.getDevice(it) }
-            .firstOrNull { has(it.sources, InputDevice.SOURCE_GAMEPAD) || has(it.sources, InputDevice.SOURCE_JOYSTICK) }
-            ?.name
+        val name = currentPad()?.name
         if (name != null) setChip(padStatus, name, C.GREEN)
         else setChip(padStatus, "No controller", C.RED)
+        refreshBattery()
+    }
+
+    /** Controller battery level and charging state (Android 12+, when the pad reports it). */
+    private fun refreshBattery() {
+        val dev = currentPad()
+        if (dev == null) {
+            batteryChip.visibility = View.GONE
+            lastBatteryStatus = -1
+            return
+        }
+        batteryChip.visibility = View.VISIBLE
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            setChip(batteryChip, "Battery: needs Android 12+", C.MUTED)
+            return
+        }
+        val bs = dev.batteryState
+        if (!bs.isPresent) {
+            setChip(batteryChip, "Battery: not reported by this controller", C.MUTED)
+            return
+        }
+        val pct = bs.capacity.takeUnless { it.isNaN() }?.let { Math.round(it * 100) }
+        val status = bs.status
+        val state = when (status) {
+            BatteryState.STATUS_CHARGING -> "Charging"
+            BatteryState.STATUS_FULL -> "Fully charged"
+            BatteryState.STATUS_DISCHARGING -> "On battery"
+            BatteryState.STATUS_NOT_CHARGING -> "Plugged in, not charging"
+            else -> null
+        }
+        val charging = status == BatteryState.STATUS_CHARGING || status == BatteryState.STATUS_FULL
+        val color = when {
+            charging -> C.GREEN
+            pct != null && pct < 15 -> C.RED
+            pct != null && pct < 30 -> C.AMBER
+            else -> C.ACCENT
+        }
+        val parts = listOfNotNull(pct?.let { "$it%" }, state)
+        val label = (if (status == BatteryState.STATUS_CHARGING) "⚡ " else "") +
+                "Battery " + (if (parts.isEmpty()) "level unknown" else parts.joinToString(" · "))
+        setChip(batteryChip, label, color)
+
+        if (lastBatteryStatus != -1 && status != lastBatteryStatus && state != null) appendLog("Controller: $state")
+        lastBatteryStatus = status
+        if (charging) lowBatteryWarned = false
+        else if (pct != null && pct <= 20 && !lowBatteryWarned) {
+            appendLog("Controller battery low ($pct%) - charge it soon")
+            lowBatteryWarned = true
+        }
     }
 
     override fun onResume() {
@@ -559,6 +622,8 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         (getSystemService(Context.INPUT_SERVICE) as InputManager).registerInputDeviceListener(this, null)
         refreshPadStatus()
         isResumedNow = true
+        ui.removeCallbacks(batteryPoll)
+        ui.post(batteryPoll)
         userStopped = false
         if (autoSwitch.isChecked && teleop == null) startDiscovery(repeat = true)
     }
@@ -567,6 +632,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         super.onPause()
         (getSystemService(Context.INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(this)
         isResumedNow = false
+        ui.removeCallbacks(batteryPoll)
         stopDiscovery()
         // Never keep driving the robot while the app is in the background.
         pad.reset()

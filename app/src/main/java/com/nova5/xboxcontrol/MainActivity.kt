@@ -368,7 +368,7 @@ class MainActivity : Activity(), InputManager.InputDeviceListener {
         val ctl = card("Controls", root)
         listOf(
             "Start" to "Enable robot", "Back" to "Disable robot",
-            "L stick" to "X / Y  ·  J1 / J2", "R stick" to "Z / Rz  ·  J3 / J4",
+            "L stick" to "X / Y  ·  J1 / J2", "R stick" to "Z / Rz  ·  J5 / J4",
             "LT  RT" to "Rx  ·  J5", "LB  RB" to "Ry  ·  J6",
             "D-pad ◀ ▶" to "J3", "D-pad ▲ ▼" to "Speed ±10%",
             "Y" to "Next jog mode", "B" to "Clear error",

@@ -25,7 +25,7 @@ Port of `nova5_xbox_control.py`. Same button mapping, same Dobot TCP-IP commands
 ## Controls (unchanged from the Python script)
 Start=enable, Back/View=disable, Y=next jog mode (Base > Tool (TCP) > Joint), B=clear error, A/X=run scripts,
 L3=stop script, R3=pause/continue, D-pad up/down=speed +/-10%,
-D-pad left/right=J3, left stick=X,Y (J1,J2), right stick=Z,Rz (J3,J4),
+D-pad left/right=J3, left stick=X,Y (J1,J2), right stick up/down=Z (J5), left/right=Rz (J4),
 LT/RT=Rx or J5, LB/RB=Ry or J6.
 
 ## Controller battery

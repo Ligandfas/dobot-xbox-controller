@@ -200,7 +200,7 @@ class Teleop(
                 val ry = -pad.ry
                 val m = mode
                 val names = if (m != JogMode.JOINT) listOf("X", "Y", "Z", "Rz", "Rx", "Ry")
-                else listOf("J1", "J2", "J3", "J4", "J5", "J6")
+                else listOf("J1", "J2", "J5", "J4", "J5", "J6") // right stick up/down = J5 in Joint mode
 
                 var desired: String? = null
                 signOrNull(lx)?.let { desired = names[0] + it }
